@@ -31,6 +31,8 @@ export type GateDecision = {
   alreadyCompleted: boolean;
   reason: GateReason;
   message: string;
+  /** When validation could not run, why (e.g. "not_configured: ..." / "api_error: ..."). */
+  validationDetail?: string | null;
 };
 
 function isStrict(): boolean {
@@ -81,6 +83,7 @@ export async function gateParticipant(participantId: string): Promise<GateDecisi
 
   const outcome = await validateParticipant(id);
   let status: GateDecision["status"] = "unchecked";
+  let validationDetail: string | null = null;
 
   if (outcome.ok) {
     status = outcome.results[0]?.status ?? "unknown";
@@ -97,14 +100,18 @@ export async function gateParticipant(participantId: string): Promise<GateDecisi
         message = "This participant ID could not be verified.";
       }
     }
-  } else if (isStrict()) {
-    // not_configured or api_error, and we're in strict (fail-closed) mode.
-    allowed = false;
-    if (reason === "ok") {
-      reason = "validation_unavailable";
-      message = "Participant validation is temporarily unavailable. Please try again shortly.";
+  } else {
+    // not_configured or api_error — record why so the cause is diagnosable
+    // (e.g. missing key vs. API rejection) without server-log access.
+    validationDetail = `${outcome.reason}: ${outcome.message}`;
+    if (isStrict()) {
+      allowed = false;
+      if (reason === "ok") {
+        reason = "validation_unavailable";
+        message = "Participant validation is temporarily unavailable. Please try again shortly.";
+      }
     }
   }
 
-  return { allowed, status, alreadyCompleted, reason, message };
+  return { allowed, status, alreadyCompleted, reason, message, validationDetail };
 }
